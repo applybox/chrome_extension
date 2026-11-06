@@ -23,7 +23,7 @@ const productionHostPermissions = [
 
 const localDevHostPermissions = [
   "http://localhost:8000/*",
-  "http://localhost:3000/*",
+  "http://localhost:3010/*",
 ];
 
 export default defineManifest({
