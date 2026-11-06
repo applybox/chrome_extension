@@ -5,6 +5,13 @@ import { getCrmProfileKey } from "./crm-url";
 export function getProfileKey(url: string | undefined): string | null {
   if (!url) return null;
 
+  // employers.indeed.com identifies the applicant by an `id` query param, so it must
+  // be matched against the raw url — the generic path-only key below strips it.
+  const indeedEmployerId = url
+    .toLowerCase()
+    .match(/employers\.indeed\.com\/candidates\/view\?[^#]*[?&]id=([a-z0-9]+)/);
+  if (indeedEmployerId) return `indeed:employer:${indeedEmployerId[1]}`;
+
   const base = url.split("#")[0].split("?")[0].replace(/\/$/, "");
   const lower = base.toLowerCase();
 

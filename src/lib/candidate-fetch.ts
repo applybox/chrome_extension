@@ -3,6 +3,7 @@ import { cvFileDataToFile, fetchCvLibraryCvData, type CvFileData } from "./cvlib
 import { fetchHeadshotFromTab, type HeadshotData } from "./headshot-fetch";
 import { fetchLinkedInContactFromTab } from "./linkedin-contact";
 import { fetchLinkedInHeadlineFromTab } from "./linkedin-profile";
+import { fetchIndeedEmployerCvData } from "./indeed-cv";
 import { sendMessage } from "./messaging";
 import { detectCrmMigrationSource } from "./crm-url";
 import { extractCrmMigrationProfile, PAGE_EXTRACTORS } from "./page-extractors";
@@ -360,13 +361,19 @@ export async function fetchCandidateFromTab(tabId: number, tabUrl: string): Prom
   const crmNeedsRetry =
     (source === "vincere" || source === "edun") &&
     (isSparseResult(raw) || !(raw?.email?.trim() || raw?.phone?.trim() || raw?.firstName?.trim()));
+  const indeedNeedsRetry =
+    source === "indeed" &&
+    tabUrl.toLowerCase().includes("employers.indeed.com") &&
+    (isSparseResult(raw) || !(raw?.email?.trim() || raw?.phone?.trim()));
 
   // SPA pages may not have hydrated — retry when data is still missing
-  if (needsRetry || cvLibraryNeedsRetry || crmNeedsRetry) {
+  // (employers.indeed.com renders the CV, where email/phone live, via react-pdf,
+  // which can lag behind the rest of the page)
+  if (needsRetry || cvLibraryNeedsRetry || crmNeedsRetry || indeedNeedsRetry) {
     await sleep(1200);
     raw = mergeExtractionResults(raw, await extractViaInjection(tabId, source));
   }
-  if (needsRetry || cvLibraryNeedsRetry || crmNeedsRetry) {
+  if (needsRetry || cvLibraryNeedsRetry || crmNeedsRetry || indeedNeedsRetry) {
     await sleep(2000);
     raw = mergeExtractionResults(raw, await extractViaInjection(tabId, source));
   }
@@ -450,6 +457,9 @@ export async function fetchCandidateFromTab(tabId: number, tabUrl: string): Prom
       await sleep(1500);
       cvFile = await fetchCvLibraryCvData(tabId, candidate, cvUrl, tabUrl);
     }
+  } else if (source === "indeed" && raw.cvUrl?.startsWith("blob:")) {
+    // employers.indeed.com applicant review page — CV is a page-local blob URL
+    cvFile = await fetchIndeedEmployerCvData(tabId, candidate, raw.cvUrl);
   }
 
   return {

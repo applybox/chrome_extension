@@ -1653,6 +1653,78 @@ export function extractCVLibraryProfile(): Record<string, string> {
 }
 
 export function extractIndeedProfile(): Record<string, string> {
+  // employers.indeed.com/candidates/view — the employer-side applicant review page.
+  // A different app to the jobseeker resume pages below: name/location come from a
+  // structured React nameplate, but email/phone/experience only exist inside the
+  // candidate's CV, which Indeed renders client-side via react-pdf (canvas + a
+  // `.textLayer` of positioned text spans). We read that rendered text layer rather
+  // than fetching the PDF ourselves — the CV file itself is fetched separately (see
+  // indeed-cv.ts) from the "Download CV" link, which is a page-local blob: URL.
+  //
+  // NOTE: this must stay a function declared *inside* extractIndeedProfile (not a
+  // sibling top-level function) — chrome.scripting.executeScript({ func }) serializes
+  // only that one function's source and injects it standalone, so a call out to a
+  // separate top-level helper throws "not defined" and silently kills extraction.
+  function extractIndeedEmployerProfile(): Record<string, string> {
+    function trim(value: string | null | undefined): string {
+      return (value || "").replace(/\s+/g, " ").trim();
+    }
+
+    const namePlate = document.querySelector('[data-testid="namePlate"]');
+    const fullName = trim(namePlate?.querySelector("h2")?.textContent || "");
+    const parts = fullName.split(" ").filter(Boolean);
+
+    const location = trim(
+      namePlate?.querySelector('[data-testid="name-plate-item"]')?.textContent || ""
+    );
+
+    const appliedToLink = document.querySelector("a[href*='/jobs/view']");
+    const jobTitle = trim(appliedToLink?.textContent || "").split(/\s*•\s*/)[0] || "";
+
+    // react-pdf's text layer renders one <span> per line separated by <br>s, with no
+    // whitespace of its own between them — .textContent alone runs lines together
+    // (e.g. "...gmail.com" + "LinkedIn: ..." becomes one glued token), which corrupts
+    // regex matches like the email below. Rebuild line breaks from the <br>s first.
+    function textLayerText(layer: Element): string {
+      let text = "";
+      for (const node of Array.from(layer.childNodes)) {
+        text +=
+          node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR"
+            ? "\n"
+            : node.textContent || "";
+      }
+      return text;
+    }
+
+    const cvText = Array.from(document.querySelectorAll(".textLayer"))
+      .map(textLayerText)
+      .join("\n");
+
+    const emailMatch = cvText.match(/[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}/);
+    const phoneMatch = cvText.match(/(\+?\d[\d\s().-]{8,}\d)/);
+
+    const downloadCvLink = Array.from(document.querySelectorAll("a")).find(
+      (a) => a.href.startsWith("blob:") && /download cv/i.test(a.textContent || "")
+    ) as HTMLAnchorElement | undefined;
+
+    return {
+      firstName: parts[0] || "",
+      lastName: parts.slice(1).join(" ") || "",
+      email: emailMatch?.[0] || "",
+      phone: trim(phoneMatch?.[1] || ""),
+      jobTitle,
+      location,
+      profileUrl: window.location.href.split("#")[0],
+      cvUrl: downloadCvLink?.href || "",
+      summary: "",
+      experience: trim(cvText).slice(0, 8000),
+    };
+  }
+
+  if (/(?:^|\.)employers\.indeed\.com$/i.test(window.location.hostname)) {
+    return extractIndeedEmployerProfile();
+  }
+
   function trim(value: string | null | undefined): string {
     return (value || "").replace(/\s+/g, " ").trim();
   }
